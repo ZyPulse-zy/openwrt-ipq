@@ -1,0 +1,34 @@
+name: Validate signed peer accounting fix
+on:
+  push:
+    branches: [bootstrap/peer-stats-import]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact signed source commit
+        run: |
+          base64 -d .bootstrap/peer-stats.bundle.b64 > /tmp/peer.bundle
+          echo '60c34718062070423e057f62c1c8b7b6d27a204e95a6af7abd697dc7c0009d00  /tmp/peer.bundle' | sha256sum -c -
+          git fetch /tmp/peer.bundle HEAD:refs/remotes/import/candidate
+          test "$(git rev-parse refs/remotes/import/candidate)" = 60792ceb840dd4f645a4920e39ede19431014e04
+          git checkout --detach refs/remotes/import/candidate
+      - name: Confirm original counter regression
+        run: |
+          if python3 package/kernel/mac80211/tests/test-nss-peer-stats.py --without-fix > /tmp/before.log 2>&1; then
+            echo 'Expected original counter failure'; exit 1
+          fi
+          grep -q 'FAIL second peer receives only its own drops' /tmp/before.log
+      - run: python3 package/kernel/mac80211/tests/test-nss-peer-stats.py
+      - run: python3 package/kernel/mac80211/tests/test-nss-peer-stats.py --sanitize
+      - name: Install cross-execution dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user
+      - name: Cross-build actual function and run both modes
+        run: python3 package/kernel/mac80211/tests/test-nss-peer-stats.py --cc aarch64-linux-gnu-gcc --runner 'qemu-aarch64 -L /usr/aarch64-linux-gnu'
+      - name: Publish exact validated branch
+        run: git push --force-with-lease=refs/heads/fix/nss-peer-drop-accounting:92a2d104145c8d265851c4b388a41bd8e9c21cd9 origin HEAD:refs/heads/fix/nss-peer-drop-accounting
