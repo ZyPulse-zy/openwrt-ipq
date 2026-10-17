@@ -1,0 +1,40 @@
+name: Validate signed host queue initialization fix
+on:
+  push:
+    branches: [bootstrap/tx-queue-import]
+permissions:
+  contents: write
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Verify exact signed source commit
+        run: |
+          base64 -d .bootstrap/tx-queue.bundle.b64 > /tmp/queue.bundle
+          echo '86b411a7d67d2f8b3443173d04029efcf0b8dcf5411c411b64514edb3d2c23d2  /tmp/queue.bundle' | sha256sum -c -
+          git fetch /tmp/queue.bundle HEAD:refs/remotes/import/candidate
+          test "$(git rev-parse refs/remotes/import/candidate)" = b6ca4245cf5c450add678cfda1d927d48ebc74b9
+          git checkout --detach refs/remotes/import/candidate
+      - name: Install test dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y zstd gcc-aarch64-linux-gnu qemu-user
+      - name: Download recipe source archive
+        run: |
+          curl --fail --location --retry 3 --max-time 120 https://sources.openwrt.org/backports-6.18.26.tar.zst -o /tmp/backports.tar.zst
+      - name: Reproduce actual original function diagnostic
+        run: |
+          if python3 package/kernel/mac80211/tests/test-offload-host-queue.py --archive /tmp/backports.tar.zst --without-fix > /tmp/before.log 2>&1; then
+            echo 'Expected original uninitialized queue failure'; exit 1
+          fi
+          cat /tmp/before.log
+          grep -E 'queue.*(uninitialized|uninitialised)' /tmp/before.log
+      - name: Actual complete patched function on host
+        run: python3 package/kernel/mac80211/tests/test-offload-host-queue.py --archive /tmp/backports.tar.zst
+      - name: Address and undefined behavior sanitizers
+        run: python3 package/kernel/mac80211/tests/test-offload-host-queue.py --archive /tmp/backports.tar.zst --sanitize
+      - name: Actual complete function on AArch64
+        run: python3 package/kernel/mac80211/tests/test-offload-host-queue.py --archive /tmp/backports.tar.zst --cc aarch64-linux-gnu-gcc --runner 'qemu-aarch64 -L /usr/aarch64-linux-gnu'
+      - name: Publish exact validated branch
+        run: git push --force-with-lease=refs/heads/fix/offload-host-queue:92a2d104145c8d265851c4b388a41bd8e9c21cd9 origin HEAD:refs/heads/fix/offload-host-queue
