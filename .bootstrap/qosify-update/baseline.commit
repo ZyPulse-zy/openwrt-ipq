@@ -1,0 +1,8 @@
+tree 702100e13a79a61c0b8f26ea9437143b4e790169
+parent 850cc271083d0ad4c3b2eefddb61f376390ddf62
+author Felix Fietkau <nbd@nbd.name> 1726866746 +0200
+committer Felix Fietkau <nbd@nbd.name> 1726866746 +0200
+
+bpf_skb_utils.h: add missing include to fix build against newer kernel headers
+
+Signed-off-by: Felix Fietkau <nbd@nbd.name>

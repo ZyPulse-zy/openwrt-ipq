@@ -1,0 +1,67 @@
+name: Verify NSS qosify upgrade with actual SDK packages and kernel loaders
+on:
+  push:
+    branches: [bootstrap/qosify-current]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  import:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .bootstrap/qosify-update
+      - name: Import exact author-preserving source commit
+        run: |
+          git fetch --filter=blob:none origin 92a2d104145c8d265851c4b388a41bd8e9c21cd9
+          python3 - <<'PY'
+          from pathlib import Path
+          import base64,hashlib,json,os,subprocess
+          root=Path('.bootstrap/qosify-update')
+          pins=json.loads((root/'pins.json').read_text())
+          data=base64.b64decode((root/'source.bundle.b64').read_text())
+          assert hashlib.sha256(data).hexdigest()==pins['bundle_sha256']
+          bundle=Path(os.environ['RUNNER_TEMP'],'qosify-source.bundle');bundle.write_bytes(data)
+          subprocess.run(['git','bundle','verify',str(bundle)],check=True)
+          subprocess.run(['git','fetch',str(bundle),'HEAD'],check=True)
+          assert subprocess.check_output(['git','rev-parse','FETCH_HEAD'],text=True).strip()==pins['nss_candidate']
+          assert subprocess.check_output(['git','show','-s','--format=%an <%ae>','FETCH_HEAD'],text=True).strip()=='Yuen Su <zypulsecore@gmail.com>'
+          assert 'Signed-off-by: Yuen Su <zypulsecore@gmail.com>' in subprocess.check_output(['git','show','-s','--format=%B','FETCH_HEAD'],text=True)
+          subprocess.run(['git','diff','--check',pins['nss_base'],'FETCH_HEAD'],check=True)
+          subprocess.run(['git','push','origin','FETCH_HEAD:refs/heads/update/qosify-2026'],check=True)
+          PY
+  sdk-and-kernel:
+    needs: import
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: control
+          sparse-checkout: .bootstrap/qosify-update
+      - uses: actions/checkout@v4
+        with:
+          ref: update/qosify-2026
+          path: source
+          sparse-checkout: |
+            package
+            target/linux/generic
+      - name: Install official build and isolated-kernel test prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential gawk libncurses-dev zlib1g-dev libssl-dev libelf-dev libcap-dev bison flex m4 bc rsync gettext python3 perl git curl patch pkg-config cmake ninja-build file unzip zstd kmod busybox qemu-user iproute2
+          sudo modprobe sch_cake
+          sudo modprobe tun
+          git -C source fetch --depth=1 --filter=blob:none origin 92a2d104145c8d265851c4b388a41bd8e9c21cd9
+      - name: Build old and new recipes, compare actual packaged BPF and production loader lifecycle
+        run: python3 control/.bootstrap/qosify-update/driver.py --workspace "$RUNNER_TEMP/qosify-update" --source "$GITHUB_WORKSPACE/source"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nss-qosify-sdk-kernel-evidence
+          path: |
+            ${{ runner.temp }}/qosify-update/evidence
+            ${{ runner.temp }}/qosify-update/*.download.log
