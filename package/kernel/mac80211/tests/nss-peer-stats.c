@@ -1,15 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /* The runner inserts the complete real source function at SOURCE_FUNCTION.
- * Only kernel synchronization, peer lookup and the wire-struct fixture are
- * simulated; this is not a full module build or firmware ABI test. */
+ * Kernel synchronization/peer lookup are fixtures. Optional driver-types.h
+ * copies exact pinned incoming statistics declarations, not firmware readback.
+ * This is not a full module build or firmware ABI test. */
 #include <assert.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+#include <stddef.h>
 typedef uint64_t u64;
 typedef uint32_t u32;
-#define NSS_WIFILI_TQM_RR_MAX 4
 #define ATH11K_DBG_NSS 0
 #define ath11k_dbg(...) ((void)0)
 #define rcu_read_lock() ((void)0)
@@ -25,6 +27,10 @@ struct peer_stats {
  u32 rx_intra_bss,rx_intra_bss_fail,rx_mic_err,rx_decrypt_err;
  u64 last_ack,last_rx;
 };
+#ifdef REAL_NSS_STATS_TYPES
+#include "driver-types.h"
+#else
+#define NSS_WIFILI_TQM_RR_MAX 4
 struct nss_wifili_peer_ctrl_stats {
  int peer_id;
  struct { u32 tx_success_cnt,tx_mcast_cnt,tx_ucast_cnt,tx_bcast_cnt;
@@ -37,6 +43,7 @@ struct nss_wifili_peer_ctrl_stats {
  struct{u32 tx_failed_retry_count,tx_multiple_retry_count,tx_mpdu_retry_count,tx_mpdu_total_retry_count,rx_retry_count;}retry;
 };
 struct nss_wifili_peer_stats{int npeers;struct nss_wifili_peer_ctrl_stats wpcs[32];};
+#endif
 struct ath11k_peer{void *sta,*vif;struct{struct peer_stats *nss_stats;bool ext_vdev_up;void *ext_vif;}nss;};
 struct ath11k { int radio; };
 struct ath11k_pdev { struct ath11k *ar; };
@@ -48,29 +55,44 @@ static struct ath11k_peer *ath11k_peer_find_by_id(struct ath11k *ar,int id){(voi
 static unsigned checks=0;
 static void check(bool ok,const char *label){checks++;if(!ok){fprintf(stderr,"FAIL %s\n",label);assert(ok);}}
 static void setup(void){memset(totals,0,sizeof(totals));memset(peers,0,sizeof(peers));for(int i=0;i<32;i++){peers[i].sta=(void*)1;peers[i].nss.nss_stats=&totals[i];}}
+static u32 bin_total(unsigned peer){return NSS_WIFILI_TQM_RR_MAX*peer+NSS_WIFILI_TQM_RR_MAX*(NSS_WIFILI_TQM_RR_MAX-1)/2;}
 int main(void){
  struct ath11k_base ab={.nss={.stats_enabled=true},.num_radios=1,.pdevs={{.ar=&radio}}};
- struct nss_wifili_peer_stats msg={.npeers=2};setup();
- for(int i=0;i<2;i++){msg.wpcs[i].peer_id=i;msg.wpcs[i].tx.tx_ucast_cnt=10;msg.wpcs[i].tx.tx_ucast_bytes=1000;}
- msg.wpcs[0].tx.dropped.drop_stats[0]=2;msg.wpcs[1].tx.dropped.drop_stats[0]=5;
- ath11k_nss_get_peer_stats(&ab,&msg);
+ /* The real driver declares a trailing wpcs[1]; allocate the actual message
+  * payload for 32 rows rather than replacing that declaration in the test. */
+ size_t message_bytes=offsetof(struct nss_wifili_peer_stats,wpcs)+32*sizeof(struct nss_wifili_peer_ctrl_stats);
+ struct nss_wifili_peer_stats *msg=calloc(1,message_bytes);assert(msg);msg->npeers=2;setup();
+ for(int i=0;i<2;i++){msg->wpcs[i].peer_id=i;msg->wpcs[i].tx.tx_ucast_cnt=10;msg->wpcs[i].tx.tx_ucast_bytes=1000;}
+ msg->wpcs[0].tx.dropped.drop_stats[0]=2;msg->wpcs[1].tx.dropped.drop_stats[0]=5;
+ ath11k_nss_get_peer_stats(&ab,msg);
  check(totals[0].tx_failed==2,"first peer drop total");
  check(totals[1].tx_failed==5,"second peer receives only its own drops");
  check(totals[0].tx_bytes==1000&&totals[1].tx_packets==10,"other counters preserved");
- ath11k_nss_get_peer_stats(&ab,&msg);check(totals[0].tx_failed==4&&totals[1].tx_failed==10,"repeated message");
- setup();struct nss_wifili_peer_ctrl_stats swap=msg.wpcs[0];msg.wpcs[0]=msg.wpcs[1];msg.wpcs[1]=swap;
- ath11k_nss_get_peer_stats(&ab,&msg);check(totals[0].tx_failed==2&&totals[1].tx_failed==5,"order independence");
- setup();msg=(struct nss_wifili_peer_stats){.npeers=32};
- for(int i=0;i<32;i++){msg.wpcs[i].peer_id=i;for(int j=0;j<NSS_WIFILI_TQM_RR_MAX;j++)msg.wpcs[i].tx.dropped.drop_stats[j]=i+j;}
- ath11k_nss_get_peer_stats(&ab,&msg);
- for(int i=0;i<32;i++)check(totals[i].tx_failed==(u32)(4*i+6),"32 peers, all drop bins");
- setup();msg.wpcs[3].peer_id=99;peers[5].sta=NULL;peers[7].nss.ext_vdev_up=true;
- ath11k_nss_get_peer_stats(&ab,&msg);
+ ath11k_nss_get_peer_stats(&ab,msg);check(totals[0].tx_failed==4&&totals[1].tx_failed==10,"repeated message");
+ setup();struct nss_wifili_peer_ctrl_stats swap=msg->wpcs[0];msg->wpcs[0]=msg->wpcs[1];msg->wpcs[1]=swap;
+ ath11k_nss_get_peer_stats(&ab,msg);check(totals[0].tx_failed==2&&totals[1].tx_failed==5,"order independence");
+ setup();memset(msg,0,message_bytes);msg->npeers=32;
+ for(int i=0;i<32;i++){msg->wpcs[i].peer_id=i;for(int j=0;j<NSS_WIFILI_TQM_RR_MAX;j++)msg->wpcs[i].tx.dropped.drop_stats[j]=i+j;}
+ ath11k_nss_get_peer_stats(&ab,msg);
+ for(int i=0;i<32;i++)check(totals[i].tx_failed==bin_total(i),"32 peers, all drop bins");
+ setup();msg->wpcs[3].peer_id=99;peers[5].sta=NULL;peers[7].nss.ext_vdev_up=true;
+ ath11k_nss_get_peer_stats(&ab,msg);
  check(totals[3].tx_failed==0&&totals[5].tx_failed==0,"missing and unassociated peer skipped");
- check(totals[4].tx_failed==22&&totals[6].tx_failed==30&&totals[7].tx_failed==34,"skip and ext-vdev isolation");
- setup();ab.nss.stats_enabled=false;ath11k_nss_get_peer_stats(&ab,&msg);check(totals[1].tx_failed==0,"statistics disabled");ab.nss.stats_enabled=true;
- msg=(struct nss_wifili_peer_stats){.npeers=2};msg.wpcs[0].peer_id=0;msg.wpcs[1].peer_id=1;
- msg.wpcs[0].tx.dropped.drop_stats[0]=7;totals[0].tx_failed=UINT32_MAX-2;
- ath11k_nss_get_peer_stats(&ab,&msg);check(totals[0].tx_failed==4&&totals[1].tx_failed==0,"existing wrap semantics and zero peer");
- printf("Actual complete peer statistics function assertions passed: %u\n",checks);return 0;
+ check(totals[4].tx_failed==bin_total(4)&&totals[6].tx_failed==bin_total(6)&&totals[7].tx_failed==bin_total(7),"skip and ext-vdev isolation");
+ setup();ab.nss.stats_enabled=false;ath11k_nss_get_peer_stats(&ab,msg);check(totals[1].tx_failed==0,"statistics disabled");ab.nss.stats_enabled=true;
+ memset(msg,0,message_bytes);msg->npeers=2;msg->wpcs[0].peer_id=0;msg->wpcs[1].peer_id=1;
+ msg->wpcs[0].tx.dropped.drop_stats[0]=7;totals[0].tx_failed=UINT32_MAX-2;
+ ath11k_nss_get_peer_stats(&ab,msg);check(totals[0].tx_failed==4&&totals[1].tx_failed==0,"existing wrap semantics and zero peer");
+#ifdef REAL_NSS_STATS_TYPES
+ /* Isolate the last real release-reason bin and its adjacent NAWDS field. */
+ setup();memset(msg,0,message_bytes);msg->npeers=2;
+ msg->wpcs[0].peer_id=0;msg->wpcs[1].peer_id=1;
+ msg->wpcs[0].tx.dropped.drop_stats[NSS_WIFILI_TQM_RR_MAX-1]=2;
+ msg->wpcs[1].tx.dropped.drop_stats[NSS_WIFILI_TQM_RR_MAX-1]=5;
+ msg->wpcs[0].tx.dropped.tx_nawds_mcast_drop_cnt=100;
+ msg->wpcs[1].tx.dropped.tx_nawds_mcast_drop_cnt=200;
+ ath11k_nss_get_peer_stats(&ab,msg);
+ check(totals[0].tx_failed==2&&totals[1].tx_failed==5,"last driver bin and adjacent field isolation");
+#endif
+ free(msg);printf("Drop bins: %u; actual complete peer statistics function assertions passed: %u\n",(unsigned)NSS_WIFILI_TQM_RR_MAX,checks);return 0;
 }
