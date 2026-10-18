@@ -1,0 +1,52 @@
+name: NSS source-exact statistics regression
+on:
+  push:
+    branches: [bootstrap/nss-real-types]
+permissions:
+  contents: write
+jobs:
+  peer-stats:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Import exact signed candidate
+        run: |
+          base64 -d .bootstrap/nss-real-types.bundle.b64 > /tmp/nss-types.bundle
+          echo '1b4990b91727593282e8aa872e8a39fd1a416c7b2fd508a645bcc55d3a6b6ac1  /tmp/nss-types.bundle' | sha256sum -c -
+          git bundle verify /tmp/nss-types.bundle
+          git fetch /tmp/nss-types.bundle HEAD:refs/heads/candidate
+          test "$(git rev-parse candidate)" = 00708c8f40b6cef80566b7516c172bcea4c4488c
+          git log -1 --format=%B candidate | grep -Fx 'Signed-off-by: Yuen Su <zypulsecore@gmail.com>'
+          git checkout candidate
+      - uses: actions/checkout@v4
+        with:
+          repository: CodeLinaro-mirror/qsdk_oss_lklm_nss-drv
+          ref: d5ee67bd84d1ee7ed81eb6758e62a6db5a0cf4c7
+          sparse-checkout: exports
+          path: driver-source
+      - uses: actions/checkout@v4
+        with:
+          repository: qosmio/nss-packages
+          ref: 0d970dbf0185e3f53709bd803e8a466598023c57
+          sparse-checkout: qca-nss-drv/patches
+          path: feed-source
+      - name: Install cross execution tools
+        run: sudo apt-get update -qq && sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user
+      - name: Test complete real callback with fixtures and patched driver declarations
+        run: |
+          script=package/kernel/mac80211/tests/test-nss-peer-stats.py
+          python3 "$script"
+          python3 "$script" --driver-header driver-source/exports/nss_wifili_if.h --driver-patches feed-source/qca-nss-drv/patches
+          python3 "$script" --driver-header driver-source/exports/nss_wifili_if.h --driver-patches feed-source/qca-nss-drv/patches --sanitize
+          python3 "$script" --driver-header driver-source/exports/nss_wifili_if.h --driver-patches feed-source/qca-nss-drv/patches --cc aarch64-linux-gnu-gcc --runner 'qemu-aarch64 -L /usr/aarch64-linux-gnu'
+      - name: Prove actual original callback still fails the peer-isolation assertion
+        run: |
+          if python3 package/kernel/mac80211/tests/test-nss-peer-stats.py --driver-header driver-source/exports/nss_wifili_if.h --driver-patches feed-source/qca-nss-drv/patches --without-fix > /tmp/original.log 2>&1; then
+            cat /tmp/original.log
+            exit 1
+          fi
+          grep -F 'FAIL second peer receives only its own drops' /tmp/original.log
+      - name: Update existing PR only after successful validation
+        run: git push --force-with-lease=refs/heads/fix/nss-peer-drop-accounting:60792ceb840dd4f645a4920e39ede19431014e04 origin candidate:refs/heads/fix/nss-peer-drop-accounting
