@@ -1,0 +1,51 @@
+name: NSS init registration lifetime
+on:
+  push:
+    branches: [bootstrap/nss-init-regression]
+permissions:
+  contents: write
+jobs:
+  init-lifetime:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Import signed candidate
+        run: |
+          base64 -d .bootstrap/nss-init.bundle.b64 > /tmp/nss-init.bundle
+          echo 'd145e2a762751b61ec6811badf947286e19580c2168c25273a92246960eb3ba3  /tmp/nss-init.bundle' | sha256sum -c -
+          git bundle verify /tmp/nss-init.bundle
+          git fetch /tmp/nss-init.bundle HEAD:refs/heads/candidate
+          test "$(git rev-parse candidate)" = bfbedc11a03025fd211c8b145fd098e52f1cc1a6
+          git log -1 --format=%B candidate | grep -Fx 'Signed-off-by: Yuen Su <zypulsecore@gmail.com>'
+          git diff --check 92a2d104145c8d265851c4b388a41bd8e9c21cd9 candidate
+          git checkout candidate
+      - uses: actions/checkout@v4
+        with:
+          repository: CodeLinaro-mirror/qsdk_oss_lklm_nss-drv
+          ref: d5ee67bd84d1ee7ed81eb6758e62a6db5a0cf4c7
+          sparse-checkout: /nss_wifili.c
+          sparse-checkout-cone-mode: false
+          path: driver-source
+      - name: Install cross tools and fetch matching recipe archive
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user zstd
+          curl --fail --location --retry 3 https://github.com/openwrt/backports/releases/download/backports-v6.18.26/backports-6.18.26.tar.zst -o /tmp/backports.tar.zst
+      - name: Test complete recipe and actual lifecycle functions
+        run: |
+          script=package/kernel/mac80211/tests/test-nss-init.py
+          python3 "$script" --driver-source driver-source/nss_wifili.c --archive /tmp/backports.tar.zst
+          python3 "$script" --driver-source driver-source/nss_wifili.c --sanitize
+          python3 "$script" --driver-source driver-source/nss_wifili.c --cc aarch64-linux-gnu-gcc --runner 'qemu-aarch64 -L /usr/aarch64-linux-gnu'
+      - name: Verify exact original resource-retention failure
+        run: |
+          if python3 package/kernel/mac80211/tests/test-nss-init.py --driver-source driver-source/nss_wifili.c --without-fix > /tmp/original.log 2>&1; then
+            cat /tmp/original.log
+            exit 1
+          fi
+          grep -F 'FAIL unready context: registration survived failed init' /tmp/original.log
+      - name: Publish new candidate after passing tests
+        run: |
+          git push '--force-with-lease=refs/heads/fix/nss-init-unregister:' origin candidate:refs/heads/fix/nss-init-unregister
