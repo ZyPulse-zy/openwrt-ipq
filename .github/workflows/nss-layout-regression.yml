@@ -2,6 +2,7 @@ name: Selected NSS firmware source layout
 on:
   push:
     branches: [bootstrap/nss-layout-regression]
+    paths: [.bootstrap/nss-layout-v2.bundle.b64]
 permissions:
   contents: write
 jobs:
@@ -13,11 +14,11 @@ jobs:
           fetch-depth: 0
       - name: Import signed source
         run: |
-          base64 -d .bootstrap/nss-layout.bundle.b64 > /tmp/layout.bundle
-          echo 'd634ffe636eb52e233943c1c046413e81331642112001d3ce2df0c358690ca5c  /tmp/layout.bundle' | sha256sum -c -
+          base64 -d .bootstrap/nss-layout-v2.bundle.b64 > /tmp/layout.bundle
+          echo 'ee6bb49a2b97add02aa23526628d5b9dafd84a5a407890be76c66f93538cca5f  /tmp/layout.bundle' | sha256sum -c -
           git bundle verify /tmp/layout.bundle
           git fetch /tmp/layout.bundle HEAD:refs/heads/candidate
-          test "$(git rev-parse candidate)" = 6c8e2e6c42216e819095ecf06b3f4fe84a149697
+          test "$(git rev-parse candidate)" = 3bbb07c5d68c66cdc2144b6418eb6859dc503a15
           git log -1 --format=%B candidate | grep -Fx 'Signed-off-by: Yuen Su <zypulsecore@gmail.com>'
           git diff --check 92a2d104145c8d265851c4b388a41bd8e9c21cd9 candidate
           git checkout candidate
