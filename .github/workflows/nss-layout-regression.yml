@@ -1,0 +1,56 @@
+name: Selected NSS firmware source layout
+on:
+  push:
+    branches: [bootstrap/nss-layout-regression]
+permissions:
+  contents: write
+jobs:
+  layout:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Import signed source
+        run: |
+          base64 -d .bootstrap/nss-layout.bundle.b64 > /tmp/layout.bundle
+          echo 'd634ffe636eb52e233943c1c046413e81331642112001d3ce2df0c358690ca5c  /tmp/layout.bundle' | sha256sum -c -
+          git bundle verify /tmp/layout.bundle
+          git fetch /tmp/layout.bundle HEAD:refs/heads/candidate
+          test "$(git rev-parse candidate)" = 6c8e2e6c42216e819095ecf06b3f4fe84a149697
+          git log -1 --format=%B candidate | grep -Fx 'Signed-off-by: Yuen Su <zypulsecore@gmail.com>'
+          git diff --check 92a2d104145c8d265851c4b388a41bd8e9c21cd9 candidate
+          git checkout candidate
+      - uses: actions/checkout@v4
+        with:
+          repository: CodeLinaro-mirror/qsdk_oss_lklm_nss-drv
+          ref: d5ee67bd84d1ee7ed81eb6758e62a6db5a0cf4c7
+          sparse-checkout: exports
+          path: driver-source
+      - uses: actions/checkout@v4
+        with:
+          repository: qosmio/nss-packages
+          ref: 0d970dbf0185e3f53709bd803e8a466598023c57
+          sparse-checkout: qca-nss-drv
+          path: feed-source
+      - name: Install cross tools
+        run: sudo apt-get update -qq && sudo apt-get install -y gcc-aarch64-linux-gnu qemu-user
+      - name: Test actual recipe flags, source serialization and actual callback
+        run: |
+          script=package/kernel/mac80211/tests/test-nss-layout.py
+          python3 "$script" --driver-header driver-source/exports/nss_wifili_if.h --driver-package feed-source/qca-nss-drv
+          python3 "$script" --driver-header driver-source/exports/nss_wifili_if.h --driver-package feed-source/qca-nss-drv --sanitize
+          python3 "$script" --driver-header driver-source/exports/nss_wifili_if.h --driver-package feed-source/qca-nss-drv --cc aarch64-linux-gnu-gcc --runner 'qemu-aarch64 -L /usr/aarch64-linux-gnu'
+      - name: Prove the exact original recipe misreads the later peer
+        run: |
+          git show 92a2d104145c8d265851c4b388a41bd8e9c21cd9:package/kernel/mac80211/Makefile > /tmp/original-mac.mk
+          if python3 package/kernel/mac80211/tests/test-nss-layout.py --driver-header driver-source/exports/nss_wifili_if.h --driver-package feed-source/qca-nss-drv --mac-recipe /tmp/original-mac.mk > /tmp/original-layout.log 2>&1; then
+            cat /tmp/original-layout.log
+            exit 1
+          fi
+          grep -F 'Producer record=212' /tmp/original-layout.log
+          grep -F 'Consumer record=196, packets=10/0' /tmp/original-layout.log
+          grep -F 'FAIL second peer row decoded with wrong layout' /tmp/original-layout.log
+      - name: Publish only after the source-contract regression passes
+        run: |
+          git push '--force-with-lease=refs/heads/fix/nss-firmware-layout:' origin candidate:refs/heads/fix/nss-firmware-layout
