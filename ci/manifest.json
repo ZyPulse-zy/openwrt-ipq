@@ -1,0 +1,102 @@
+[
+  {
+    "repo": "qosmio/openwrt-ipq",
+    "n": 129,
+    "source": "nss-openwrt",
+    "slug": "nss-peer",
+    "message": "mac80211: ath11k: keep NSS drop totals local to each peer\n\nReset tx_dropped before summing each peer's statistics. With peers\nreporting 2 and 5 drops, the shared accumulator charges 7 to the second\npeer. Preserve the existing counter arithmetic and bump the package\nrelease.\n\nSigned-off-by: Yuen Su <zypulsecore@gmail.com>\n",
+    "old": "00708c8f40b6cef80566b7516c172bcea4c4488c",
+    "base": "92a2d104145c8d265851c4b388a41bd8e9c21cd9",
+    "branch": "fix/nss-peer-drop-accounting",
+    "fork": "ZyPulse-zy/openwrt-ipq",
+    "files": [
+      "package/kernel/mac80211/Makefile",
+      "package/kernel/mac80211/patches/nss/ath11k/999-921-ath11k-nss-reset-per-peer-drop-total.patch",
+      "package/kernel/mac80211/tests/README.md",
+      "package/kernel/mac80211/tests/nss-peer-stats.c",
+      "package/kernel/mac80211/tests/test-nss-peer-stats.py"
+    ],
+    "upstream_base_now": "92a2d104145c8d265851c4b388a41bd8e9c21cd9",
+    "candidate": "4e108daacbac06755528bce19d62985a0793211e",
+    "upstream_files": [
+      "package/kernel/mac80211/Makefile",
+      "package/kernel/mac80211/patches/nss/ath11k/999-921-ath11k-nss-reset-per-peer-drop-total.patch"
+    ],
+    "bundle_sha256": "0ed56a037f1bfc10a250148a7e8b604dbdf31cea2ba7bee89bb5280cdcf08a9f"
+  },
+  {
+    "repo": "qosmio/openwrt-ipq",
+    "n": 130,
+    "source": "nss-tx",
+    "slug": "host-queue",
+    "message": "mac80211: initialize the host queue for offloaded 802.3 TX\n\nHAS_TX_QUEUE skips software queue selection but the local queue is still\nused to index vif.hw_queue. Initialize it to IEEE80211_AC_BE, preserving\nthe driver-owned skb queue mapping and priority. Bump the package release.\n\nSigned-off-by: Yuen Su <zypulsecore@gmail.com>\n",
+    "old": "b6ca4245cf5c450add678cfda1d927d48ebc74b9",
+    "base": "92a2d104145c8d265851c4b388a41bd8e9c21cd9",
+    "branch": "fix/offload-host-queue",
+    "fork": "ZyPulse-zy/openwrt-ipq",
+    "files": [
+      "package/kernel/mac80211/Makefile",
+      "package/kernel/mac80211/patches/nss/subsys/999-921-mac80211-initialize-offload-host-queue.patch",
+      "package/kernel/mac80211/tests/README-offload-host-queue.md",
+      "package/kernel/mac80211/tests/offload-host-queue.c",
+      "package/kernel/mac80211/tests/test-offload-host-queue.py"
+    ],
+    "upstream_base_now": "92a2d104145c8d265851c4b388a41bd8e9c21cd9",
+    "candidate": "69c286d7e29bcda49f0ec2c6ba41f28b28a0268a",
+    "upstream_files": [
+      "package/kernel/mac80211/Makefile",
+      "package/kernel/mac80211/patches/nss/subsys/999-921-mac80211-initialize-offload-host-queue.patch"
+    ],
+    "bundle_sha256": "b237f6beabcf063048d95a6de0bc3c3429ace8eebdd81e1cf5a61a00d704ff54"
+  },
+  {
+    "repo": "qosmio/openwrt-ipq",
+    "n": 131,
+    "source": "nss-init",
+    "slug": "nss-init",
+    "message": "mac80211: ath11k: unregister an unready NSS context\n\nThe NSS interface is registered before its readiness check. Route the\nunready-context failure through the existing unregister label so failed\ninitialization does not leave the registration behind. Preserve earlier\ncleanup paths and return values; bump the package release.\n\nSigned-off-by: Yuen Su <zypulsecore@gmail.com>\n",
+    "old": "bfbedc11a03025fd211c8b145fd098e52f1cc1a6",
+    "base": "92a2d104145c8d265851c4b388a41bd8e9c21cd9",
+    "branch": "fix/nss-init-unregister",
+    "fork": "ZyPulse-zy/openwrt-ipq",
+    "files": [
+      "package/kernel/mac80211/Makefile",
+      "package/kernel/mac80211/patches/nss/ath11k/999-922-ath11k-nss-unregister-on-unready-context.patch",
+      "package/kernel/mac80211/tests/README-nss-init.md",
+      "package/kernel/mac80211/tests/nss-init.c",
+      "package/kernel/mac80211/tests/test-nss-init.py"
+    ],
+    "upstream_base_now": "92a2d104145c8d265851c4b388a41bd8e9c21cd9",
+    "candidate": "c039b1f3f5a4cc2f626358f0bea7511cab626014",
+    "upstream_files": [
+      "package/kernel/mac80211/Makefile",
+      "package/kernel/mac80211/patches/nss/ath11k/999-922-ath11k-nss-unregister-on-unready-context.patch"
+    ],
+    "bundle_sha256": "625e6c7db14834a721c57b7ea7f3419008d838a2df386a1114f78fe902d78a69"
+  },
+  {
+    "repo": "qosmio/openwrt-ipq",
+    "n": 132,
+    "source": "nss-layout",
+    "slug": "nss-layout",
+    "message": "mac80211: match the selected NSS 12.5 statistics layout\n\nThe NSS driver enables NSS_FIRMWARE_VERSION_12_5 while mac80211 omits it,\nso the consumer reads peer statistics with a shorter stride. Pass the\ndefine for selected 12.5 ath11k NSS builds and track the firmware\nselectors as rebuild dependencies. Preserve 11.4 and disabled-NSS paths;\nbump the package release.\n\nSigned-off-by: Yuen Su <zypulsecore@gmail.com>\n",
+    "old": "3bbb07c5d68c66cdc2144b6418eb6859dc503a15",
+    "base": "92a2d104145c8d265851c4b388a41bd8e9c21cd9",
+    "branch": "fix/nss-firmware-layout",
+    "fork": "ZyPulse-zy/openwrt-ipq",
+    "files": [
+      "package/kernel/mac80211/Makefile",
+      "package/kernel/mac80211/tests/README-nss-layout.md",
+      "package/kernel/mac80211/tests/nss-layout-consumer.c",
+      "package/kernel/mac80211/tests/nss-layout-producer.c",
+      "package/kernel/mac80211/tests/nss_driver_export.py",
+      "package/kernel/mac80211/tests/test-nss-layout.py"
+    ],
+    "upstream_base_now": "92a2d104145c8d265851c4b388a41bd8e9c21cd9",
+    "candidate": "bc896ea170c88a78124bbbfca50d7b6bb33edc82",
+    "upstream_files": [
+      "package/kernel/mac80211/Makefile"
+    ],
+    "bundle_sha256": "ca212aa449439e92a4fde7da85d4a47db7133eb93917a399bd2c2cf15ad68971"
+  }
+]

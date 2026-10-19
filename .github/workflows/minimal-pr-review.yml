@@ -1,0 +1,38 @@
+name: Verify minimal PR revisions
+on:
+  push:
+    branches: [bootstrap/pr-maintenance-minimal-20261019]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          ref: 92a2d104145c8d265851c4b388a41bd8e9c21cd9
+          fetch-depth: 1
+          path: source
+      - name: Install shell syntax tools
+        run: sudo apt-get update && sudo apt-get install -y busybox
+      - name: Verify candidate trees and retained tests
+        run: |
+          mkdir -p bin
+          ln -s "$(command -v busybox)" bin/ash
+          python3 ci/verify-revisions.py --manifest ci/manifest.json --source source --output evidence --ash "$GITHUB_WORKSPACE/bin/ash"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: minimal-pr-revisions-openwrt-ipq
+          path: evidence/
+          if-no-files-found: error
+      - name: Publish only validated candidate branches
+        run: |
+          python3 - <<'PYCODE'
+          import json,subprocess
+          from pathlib import Path
+          source=Path('source').resolve()
+          for c in json.loads(Path('ci/manifest.json').read_text()):
+              subprocess.run(['git','-C',str(source),'push','origin',c['candidate']+':refs/heads/validated/minimal-'+c['slug']+'-20261019'],check=True)
+          PYCODE
